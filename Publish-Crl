@@ -1,0 +1,71 @@
+<#
+.SYNOPSIS
+    Script is publishing a Microsoft PKI CRL into default folder and copy it to a folder (Web server URI which is the distibution point in the certificates.
+    Only german "Zertifizierungsstellen" are supported. See getting CA name in script.
+.NOTES
+    Created by Sebastian Troue on 2025/02/28
+#>
+
+Param(
+    [string]$ToFolder = "\\www-server\inetpub\wwwroot\PKI",
+    [string]$Logfile = "C:\temp\Publish-Crl.ps1.log"
+)
+
+
+#region Write-Log
+function Write-Log ([Parameter(ValueFromPipeline=$true)]$Message, [switch]$ToDebug, [string]$Path=$LogFile) {
+    process {
+        if ($ToDebug -and -not $DebugToLogfile) {
+            return
+        }
+        # Create folder
+        $CurrentLogDir = Split-Path $Path -Parent
+        if (!(Test-Path $CurrentLogDir )) {
+            New-Item -Path $CurrentLogDir -ItemType Directory | Out-Null
+        }
+        try {
+            #Add-Content -Path $Path -Value $Message -Encoding UTF8
+            $LogTime = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+            Add-Content -Path $Path -Value "[$LogTime] - $Message" -Encoding UTF8
+        }
+        catch {
+            $Line = $_.InvocationInfo.ScriptLineNumber
+            Write-Warning "Error in line $Line"
+            Write-Warning $_.Exception.Message
+        }
+    }
+}
+#endregion
+
+
+try {
+    Write-Log -Message "Time to publish CRL again to $ToFolder ########################" -Path $LogFile
+    
+    # Getting CA Name
+    Write-Log -Message "Exec certutil -TCAInfo" -Path $LogFile
+    # Todo Multi language support
+    $CaName = $(certutil -TCAInfo) | Select-String -Pattern "^Zertifizierungsstelle: (.+)$"
+    $CaName = $CaName.Matches.Groups[1].Value
+    Write-Log -Message "CaName: $CaName" -Path $LogFile
+    
+    # Publishing CRL
+    Write-Log -Message "Exec Certutil -CRL" -Path $LogFile
+    $CertutilReturn = $(&Certutil -CRL)
+    Write-Log -Message "$CertutilReturn" -Path $LogFile
+    
+    $OrgFile = "$($env:SystemRoot)\system32\certsrv\CertEnroll\$($CaName).crl"
+    if (Test-Path "$OrgFile") {
+        # Copy file
+        Write-Log -Message "Copy-Item $OrgFile -Destination $ToFolder -Force" -Path $LogFile
+        Copy-Item $OrgFile -Destination $ToFolder -Force
+    } else {
+        Throw "No crl found - filename ->$OrgFile<-"
+    }
+    Write-Log -Message "Done" -Path $LogFile
+}
+catch {
+    $Line = $_.InvocationInfo.ScriptLineNumber
+    Write-Warning "Error in line $Line"
+    Write-Warning $_.Exception.Message
+    Write-Log -Message "Error in line $Line - $_" -Path $LogFile
+}
